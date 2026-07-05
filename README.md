@@ -62,6 +62,60 @@ m,n,s_x,s_y,s_yaw
 0.8264,0.4666,1.0000,0.7000,-0.2400
 ```
 
+## 数据采集
+
+`scripts/collect_sensor_odin_data.py` 可以交互式采集多路测距传感器和
+Odin 定位数据。脚本直接读取 CH9344 USB 串口数据，并订阅
+`/odin1/relocation` 的 `geometry_msgs/PoseStamped`。
+
+运行前需要 ROS 2 环境和 `pyserial`：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+pip install -e .
+```
+
+采集：
+
+```bash
+python3 scripts/collect_sensor_odin_data.py -o sensor_odin_samples.csv
+```
+
+脚本启动后，输入 `y` 追加一行 CSV，输入 `q` 退出。
+
+默认输入：
+
+| 来源 | 默认值 |
+|---|---|
+| 测距传感器 | `/dev/ttyCH9344USB0` 到 `/dev/ttyCH9344USB6` |
+| 波特率 | `230400` |
+| Odin 位姿话题 | `/odin1/relocation` |
+| 输出 CSV | `sensor_odin_samples.csv` |
+
+每行 CSV 字段：
+
+```text
+sample_index, ros_time_s, unix_time_s,
+sensor_0_mm ... sensor_6_mm,
+odin_frame_id, odin_stamp_s,
+odin_x_m, odin_y_m, odin_z_m,
+odin_qx, odin_qy, odin_qz, odin_qw,
+odin_yaw_rad, odin_pose_age_s
+```
+
+常用覆盖参数：
+
+```bash
+# 改 Odin 话题
+python3 scripts/collect_sensor_odin_data.py \
+  -o calibration.csv \
+  --pose-topic /odin1/relocation
+
+# 指定串口列表
+python3 scripts/collect_sensor_odin_data.py \
+  --port-names /dev/ttyCH9344USB0,/dev/ttyCH9344USB1,/dev/ttyCH9344USB2
+```
+
 ## 命令行接口
 
 拟合模型：
