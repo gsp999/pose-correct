@@ -9,7 +9,7 @@ from typing import Any
 from .models import CalibrationResult, Observation, PoseEstimate
 
 
-CSV_COLUMNS = ("m", "n", "p", "s_x", "s_y", "s_yaw")
+CSV_COLUMNS = ("m", "n", "s_x", "s_y", "s_yaw")
 
 
 def load_observations_csv(path: str | Path) -> list[Observation]:
@@ -22,7 +22,6 @@ def load_observations_csv(path: str | Path) -> list[Observation]:
             Observation(
                 m=float(row["m"]),
                 n=float(row["n"]),
-                p=float(row["p"]),
                 s_x=float(row["s_x"]),
                 s_y=float(row["s_y"]),
                 s_yaw=float(row["s_yaw"]),
@@ -49,15 +48,4 @@ def load_calibration(path: str | Path) -> CalibrationResult:
     data: dict[str, Any]
     with Path(path).open("r", encoding="utf-8") as handle:
         data = json.load(handle)
-    data["x_coefficients"] = tuple(data["x_coefficients"])
-    data["y_coefficients"] = tuple(data["y_coefficients"])
-    data.setdefault("fit_method", "linear")
-    data.setdefault("position_scale", 0.02)
-    data.setdefault("yaw_scale", 0.02)
-    data.setdefault("optimizer_cost", None)
-    data.setdefault("optimizer_iterations", None)
-    data.setdefault("ab_sensor_x", None)
-    data.setdefault("ab_sensor_mid_y", None)
-    data.setdefault("p_sensor_x", None)
-    data.setdefault("p_sensor_y", None)
     return CalibrationResult(**data)

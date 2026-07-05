@@ -18,16 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     fit = subparsers.add_parser("fit", help="fit a correction model from a CSV file")
     fit.add_argument("input_csv")
-    fit.add_argument("--mn-distance", type=float, required=True)
     fit.add_argument("--model", default="pose_correct_model.json")
-    fit.add_argument("--yaw-sign", type=int, choices=(-1, 1), default=1)
-    fit.add_argument(
-        "--method",
-        choices=("explicit_geometry", "robust_geometric", "linear"),
-        default="explicit_geometry",
-    )
-    fit.add_argument("--position-scale", type=float, default=0.02)
-    fit.add_argument("--yaw-scale", type=float, default=0.02)
 
     correct = subparsers.add_parser("correct", help="apply a fitted model to a CSV file")
     correct.add_argument("input_csv")
@@ -42,14 +33,7 @@ def main() -> None:
 
     if args.command == "fit":
         observations = load_observations_csv(args.input_csv)
-        corrector = PoseCorrector.fit(
-            observations,
-            mn_distance=args.mn_distance,
-            yaw_sign=args.yaw_sign,
-            method=args.method,
-            position_scale=args.position_scale,
-            yaw_scale=args.yaw_scale,
-        )
+        corrector = PoseCorrector.fit(observations)
         save_calibration(args.model, corrector.calibration)
         print(asdict(corrector.calibration))
         return
