@@ -62,6 +62,152 @@ m,n,s_x,s_y,s_yaw
 0.8264,0.4666,1.0000,0.7000,-0.2400
 ```
 
+如果 Odin 原点不在场地边缘，先用对应队伍配置里的
+`field_origin_in_odin` 做平移：
+
+```text
+field_x = odin_x - teams.<red_or_blue>.field_origin_in_odin.x_m
+field_y = odin_y - teams.<red_or_blue>.field_origin_in_odin.y_m
+field_yaw = odin_yaw
+```
+
+也就是说，新世界坐标系的原点只需要提供“它在 Odin 坐标系下的
+位置”。两个坐标系的 x/y 轴方向保持一致，不需要旋转参数。
+
+## 固定几何配置
+
+`config/pick_geometry.yaml` 保存运行时固定信息：
+
+```yaml
+gripper:
+  forward_m: 0.0
+  left_m: 0.0
+  yaw_rad: 0.0
+
+teams:
+  red:
+    field_origin_in_odin:
+      x_m: 0.0
+      y_m: 0.0
+    targets:
+      default:
+        x_m: 0.0
+        y_m: 0.0
+        yaw_rad: 0.0
+  blue:
+    field_origin_in_odin:
+      x_m: 0.0
+      y_m: 0.0
+    targets:
+      default:
+        x_m: 0.0
+        y_m: 0.0
+        yaw_rad: 0.0
+```
+
+约定：
+
+- `teams.red.field_origin_in_odin`：红方场地边缘世界坐标系原点，在 Odin 坐标系下的位置。
+- `teams.blue.field_origin_in_odin`：蓝方场地边缘世界坐标系原点，在 Odin 坐标系下的位置。
+- `teams.*.targets.*`：红/蓝各自需要夹取的目标，坐标在各自场地边缘世界坐标系下。
+- `gripper.forward_m`：夹爪夹取点相对 Odin 点 `S` 的前向偏移。
+- `gripper.left_m`：夹爪夹取点相对 Odin 点 `S` 的左向偏移。
+- `gripper.yaw_rad`：夹爪坐标系相对车体朝向的角度偏移。
+
+## 目标到夹爪坐标的变换逻辑
+
+`pose-correct` 最终要给 `pick_action` 的不是 Odin 全局坐标，而是目标
+相对夹爪的局部坐标：
+
+```text
+pick.x_m = 目标相对夹爪的左右偏差，左为正
+pick.y_m = 目标相对夹爪的前后距离，前为正
+```
+
+完整链路分三步。
+
+第一步，把修正后的 Odin 位姿平移到红/蓝自己的场地边缘世界坐标系。
+红蓝是两个完全独立的场地，所以各自使用自己的 `field_origin_in_odin`：
+
+```text
+robot_field_x = corrected_odin_x - team.field_origin_in_odin.x_m
+robot_field_y = corrected_odin_y - team.field_origin_in_odin.y_m
+robot_field_yaw = corrected_odin_yaw
+```
+
+这里没有旋转，因为场地坐标系和 Odin 坐标系的 x/y 轴方向相同。
+
+第二步，在场地边缘世界坐标系下，计算目标相对机器人 Odin 点 `S`
+的向量：
+
+```text
+dx = target_field_x - robot_field_x
+dy = target_field_y - robot_field_y
+```
+
+然后把这个世界向量旋转到机器人自身坐标系。机器人坐标系约定：
+
+```text
++forward = 机器人当前 yaw 朝向
++left    = 机器人左侧
+```
+
+公式：
+
+```text
+target_forward =  dx*cos(yaw) + dy*sin(yaw)
+target_left    = -dx*sin(yaw) + dy*cos(yaw)
+```
+
+第三步，减去夹爪相对 Odin 点 `S` 的安装偏移：
+
+```text
+delta_forward = target_forward - gripper.forward_m
+delta_left    = target_left    - gripper.left_m
+```
+
+如果夹爪坐标系和车体坐标系还有一个固定角度差 `gripper.yaw_rad`，
+再把这个偏差旋到夹爪坐标系：
+
+```text
+pick_y =  delta_forward*cos(gripper_yaw) + delta_left*sin(gripper_yaw)
+pick_x = -delta_forward*sin(gripper_yaw) + delta_left*cos(gripper_yaw)
+```
+
+最后输出给 `pick_action`：
+
+```text
+x_m = pick_x
+y_m = pick_y
+```
+
+得到修正后的机器人场地坐标后，可以这样调用：
+
+```python
+from pose_correct import (
+    PoseEstimate,
+    load_pick_geometry_config,
+    target_to_pick_coordinates,
+)
+
+cfg = load_pick_geometry_config("config/pick_geometry.yaml")
+team = cfg.teams["red"]
+robot = PoseEstimate(x=1.0, y=0.7, yaw=0.0)  # corrected field/world pose
+target = team.targets["default"]
+pick = target_to_pick_coordinates(
+    robot_pose_field=robot,
+    target_pose_field=target,
+    gripper=cfg.gripper,
+)
+
+print(pick.x_m, pick.y_m, pick.yaw_rad)
+```
+
+其中 `pick.x_m` 是目标相对夹爪的左右偏差，`pick.y_m` 是目标相对
+夹爪的前后距离。这个结果可以发布成和 2D 雷达识别相同语义的
+`/spear_recognition/result`，让 `pick_action_server` 继续使用原来的
+`ALIGN_X -> FORWARD -> GRASP` 流程。
+
 ## 数据采集
 
 `scripts/collect_sensor_odin_data.py` 可以交互式采集多路测距传感器和
@@ -87,7 +233,7 @@ python3 scripts/collect_sensor_odin_data.py -o sensor_odin_samples.csv
 
 | 来源 | 默认值 |
 |---|---|
-| 测距传感器 | `/dev/ttyCH9344USB0` 到 `/dev/ttyCH9344USB6` |
+| 测距传感器 | `/dev/ttyCH9344USB0` 到 `/dev/ttyCH9344USB7` |
 | 波特率 | `230400` |
 | Odin 位姿话题 | `/odin1/relocation` |
 | 输出 CSV | `sensor_odin_samples.csv` |
@@ -96,7 +242,7 @@ python3 scripts/collect_sensor_odin_data.py -o sensor_odin_samples.csv
 
 ```text
 sample_index, ros_time_s, unix_time_s,
-sensor_0_mm ... sensor_6_mm,
+sensor_0_mm ... sensor_7_mm,
 odin_frame_id, odin_stamp_s,
 odin_x_m, odin_y_m, odin_z_m,
 odin_qx, odin_qy, odin_qz, odin_qw,

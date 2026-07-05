@@ -241,7 +241,7 @@ def _build_fieldnames(sensor_count: int) -> List[str]:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description='交互式采集七路测距传感器和 Odin 定位到 CSV。'
+        description='交互式采集八路测距传感器和 Odin 定位到 CSV。'
     )
     parser.add_argument(
         '-o', '--output',
@@ -251,8 +251,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--sensor-count',
         type=int,
-        default=7,
-        help='采集传感器数量，默认 7。',
+        default=8,
+        help='采集传感器数量，默认 8。',
     )
     parser.add_argument(
         '--port-prefix',

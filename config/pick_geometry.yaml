@@ -1,0 +1,40 @@
+# Fixed geometry used to convert corrected robot pose into pick_action input.
+#
+# Coordinate frames:
+# - odin: raw global pose frame published by Odin.
+# - field: per-team world frame whose origin is that team's field edge/corner.
+#   Its x/y axes are parallel to odin; only translation differs.
+# - robot: body frame at Odin point S. +forward_m faces robot heading, +left_m
+#   points to robot left.
+# - gripper: pick frame. pick_action receives x_m=left offset, y_m=forward
+#   offset relative to this frame.
+
+gripper:
+  # Gripper pick point expressed in robot body frame at Odin point S.
+  forward_m: 0.0
+  left_m: 0.0
+  yaw_rad: 0.0
+
+teams:
+  red:
+    # Red field/world origin expressed in the original Odin frame.
+    field_origin_in_odin:
+      x_m: 0.0
+      y_m: 0.0
+    targets:
+      default:
+        # Target pose expressed in the red field/world frame.
+        x_m: 0.0
+        y_m: 0.0
+        yaw_rad: 0.0
+  blue:
+    # Blue field/world origin expressed in the original Odin frame.
+    field_origin_in_odin:
+      x_m: 0.0
+      y_m: 0.0
+    targets:
+      default:
+        # Target pose expressed in the blue field/world frame.
+        x_m: 0.0
+        y_m: 0.0
+        yaw_rad: 0.0
