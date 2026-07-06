@@ -30,29 +30,36 @@ M_SENSOR_X = -0.3739821743
 M_SENSOR_Y = 0.0124127122
 N_SENSOR_X = 0.0443469277
 N_SENSOR_Y = -0.3087514918
+DEFAULT_TARGET_X_M = 1.05
+DEFAULT_TARGET_Y_M = -0.15
+DEFAULT_DIRECT = 1.0
 
 
 def load_geometry(
     config_path: str | Path = 'config/pick_geometry.yaml',
     team: str = 'blue',
-) -> tuple[float, float, float, float, float]:
-    """Return field origin and gripper geometry from the YAML config."""
+    target: str = 'default',
+) -> tuple[float, float, float, float, float, float, float]:
+    """Return field origin, gripper geometry, and target from the YAML config."""
     with Path(config_path).open('r', encoding='utf-8') as handle:
         data = yaml.safe_load(handle) or {}
     try:
         origin = data['teams'][team]['field_origin_in_odin']
         gripper = data['gripper']
+        target_pose = data['teams'][team]['targets'][target]
         return (
             float(origin['x_m']),
             float(origin['y_m']),
             float(gripper['forward_m']),
             float(gripper['left_m']),
             float(gripper.get('yaw_rad', 0.0)),
+            float(target_pose['x_m']),
+            float(target_pose['y_m']),
         )
     except KeyError as exc:
         raise SystemExit(
-            'missing field origin or gripper geometry in %s for team %s'
-            % (config_path, team)
+            'missing field origin, gripper geometry, or target in %s '
+            'for team %s target %s' % (config_path, team, target)
         ) from exc
 
 
@@ -120,6 +127,34 @@ def robot_to_gripper_pose(
     return gripper_x_m, gripper_y_m, gripper_yaw_rad
 
 
+def gripper_forward_move_to_target(
+    gripper_x_m: float,
+    gripper_y_m: float,
+    gripper_yaw_rad: float,
+    target_x_m: float,
+    target_y_m: float,
+) -> tuple[float, float, float, float]:
+    """Project the target onto the gripper yaw line.
+
+    Returns ``(forward_move_m, lateral_error_m, projection_x_m,
+    projection_y_m)``. Positive ``forward_move_m`` means moving along the
+    gripper yaw direction.
+    """
+    dx = float(target_x_m) - float(gripper_x_m)
+    dy = float(target_y_m) - float(gripper_y_m)
+    yaw = float(gripper_yaw_rad)
+    forward_x = math.cos(yaw)
+    forward_y = math.sin(yaw)
+    left_x = -math.sin(yaw)
+    left_y = math.cos(yaw)
+
+    forward_move_m = dx * forward_x + dy * forward_y
+    lateral_error_m = dx * left_x + dy * left_y
+    projection_x_m = float(gripper_x_m) + forward_move_m * forward_x
+    projection_y_m = float(gripper_y_m) + forward_move_m * forward_y
+    return forward_move_m, lateral_error_m, projection_x_m, projection_y_m
+
+
 def correct_pose_from_odin(
     sensor_3_mm: float,
     sensor_5_mm: float,
@@ -131,6 +166,9 @@ def correct_pose_from_odin(
     gripper_forward_m: float,
     gripper_left_m: float,
     gripper_yaw_offset_rad: float,
+    target_x_m: float = DEFAULT_TARGET_X_M,
+    target_y_m: float = DEFAULT_TARGET_Y_M,
+    direct: float = DEFAULT_DIRECT,
 ) -> dict[str, float]:
     """Correct pose from raw Odin coordinates and sensor distances.
 
@@ -156,6 +194,19 @@ def correct_pose_from_odin(
         gripper_left_m,
         gripper_yaw_offset_rad,
     )
+    (
+        gripper_forward_move_m,
+        gripper_lateral_error_m,
+        target_projection_x_m,
+        target_projection_y_m,
+    ) = gripper_forward_move_to_target(
+        gripper_x_m,
+        gripper_y_m,
+        gripper_yaw_rad,
+        target_x_m,
+        target_y_m,
+    )
+    directed_gripper_forward_move_m = float(direct) * gripper_forward_move_m
     return {
         'input_field_x_m': input_field_x_m,
         'input_field_y_m': input_field_y_m,
@@ -166,6 +217,14 @@ def correct_pose_from_odin(
         'corrected_gripper_x_m': gripper_x_m,
         'corrected_gripper_y_m': gripper_y_m,
         'corrected_gripper_yaw_rad': gripper_yaw_rad,
+        'target_x_m': float(target_x_m),
+        'target_y_m': float(target_y_m),
+        'target_projection_x_m': target_projection_x_m,
+        'target_projection_y_m': target_projection_y_m,
+        'gripper_forward_move_m': directed_gripper_forward_move_m,
+        'raw_gripper_forward_move_m': gripper_forward_move_m,
+        'direct': float(direct),
+        'gripper_lateral_error_m': gripper_lateral_error_m,
         'robot_delta_x_m': corrected_robot_x_m - input_field_x_m,
         'robot_delta_y_m': corrected_robot_y_m - input_field_y_m,
     }
@@ -181,6 +240,30 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument('--odin-y-m', type=float)
     parser.add_argument('--odin-yaw-rad', type=float)
     parser.add_argument('--team', default='blue', help='Team key in config YAML.')
+    parser.add_argument(
+        '--target',
+        default='default',
+        help='Target key under teams.<team>.targets in config YAML.',
+    )
+    parser.add_argument(
+        '--target-x-m',
+        type=float,
+        default=None,
+        help='Target x in the selected field frame. Defaults to YAML, then 1.05.',
+    )
+    parser.add_argument(
+        '--target-y-m',
+        type=float,
+        default=None,
+        help='Target y in the selected field frame. Defaults to YAML, then -0.15.',
+    )
+    parser.add_argument(
+        '--direct',
+        type=float,
+        default=DEFAULT_DIRECT,
+        choices=(-1.0, 1.0),
+        help='Direction multiplier for gripper_forward_move_m: 1 or -1.',
+    )
     parser.add_argument(
         '--config',
         default='config/pick_geometry.yaml',
@@ -210,6 +293,9 @@ def _correct_csv(
     gripper_forward_m: float,
     gripper_left_m: float,
     gripper_yaw_offset_rad: float,
+    target_x_m: float,
+    target_y_m: float,
+    direct: float,
 ) -> None:
     input_path = Path(input_csv)
     output_path = Path(output_csv)
@@ -238,6 +324,14 @@ def _correct_csv(
             'corrected_gripper_x_m',
             'corrected_gripper_y_m',
             'corrected_gripper_yaw_rad',
+            'target_x_m',
+            'target_y_m',
+            'target_projection_x_m',
+            'target_projection_y_m',
+            'gripper_forward_move_m',
+            'raw_gripper_forward_move_m',
+            'direct',
+            'gripper_lateral_error_m',
             'robot_delta_x_m',
             'robot_delta_y_m',
         ]
@@ -256,6 +350,9 @@ def _correct_csv(
                     gripper_forward_m,
                     gripper_left_m,
                     gripper_yaw_offset_rad,
+                    target_x_m,
+                    target_y_m,
+                    direct,
                 )
                 for key, value in result.items():
                     row[key] = repr(value)
@@ -270,7 +367,13 @@ def main() -> None:
         gripper_forward_m,
         gripper_left_m,
         gripper_yaw_offset_rad,
-    ) = load_geometry(args.config, args.team)
+        target_x_m,
+        target_y_m,
+    ) = load_geometry(args.config, args.team, args.target)
+    if args.target_x_m is not None:
+        target_x_m = args.target_x_m
+    if args.target_y_m is not None:
+        target_y_m = args.target_y_m
     if args.input_csv:
         _correct_csv(
             args.input_csv,
@@ -280,6 +383,9 @@ def main() -> None:
             gripper_forward_m=gripper_forward_m,
             gripper_left_m=gripper_left_m,
             gripper_yaw_offset_rad=gripper_yaw_offset_rad,
+            target_x_m=target_x_m,
+            target_y_m=target_y_m,
+            direct=args.direct,
         )
         print('wrote %s' % args.output_csv)
         return
@@ -307,6 +413,9 @@ def main() -> None:
         gripper_forward_m,
         gripper_left_m,
         gripper_yaw_offset_rad,
+        target_x_m,
+        target_y_m,
+        args.direct,
     )
     for key in (
         'input_field_x_m',
@@ -318,6 +427,14 @@ def main() -> None:
         'corrected_gripper_x_m',
         'corrected_gripper_y_m',
         'corrected_gripper_yaw_rad',
+        'target_x_m',
+        'target_y_m',
+        'target_projection_x_m',
+        'target_projection_y_m',
+        'gripper_forward_move_m',
+        'raw_gripper_forward_move_m',
+        'direct',
+        'gripper_lateral_error_m',
         'robot_delta_x_m',
         'robot_delta_y_m',
     ):
